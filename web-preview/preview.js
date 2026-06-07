@@ -39,6 +39,45 @@ function formatPercent(value) {
   return `${roundMoney(value)}%`;
 }
 
+const DISPLAY_CURRENCIES = ["CNY", "HKD", "USD"];
+const DISPLAY_CURRENCY_KEY = "asset-miniapp.displayCurrency";
+
+function getDisplayCurrency() {
+  const saved = localStorage.getItem(DISPLAY_CURRENCY_KEY);
+  return DISPLAY_CURRENCIES.includes(saved) ? saved : "CNY";
+}
+function setDisplayCurrency(code) {
+  localStorage.setItem(DISPLAY_CURRENCY_KEY, code);
+}
+function convertFromCny(amountCny, targetCode) {
+  const rate = getDefaultRate(targetCode);
+  return rate > 0 ? roundMoney(amountCny / rate) : 0;
+}
+function formatDisplayAmount(totalCny, code) {
+  const amount = convertFromCny(totalCny, code);
+  return amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+function calcMonthGrowth(snapshots, currentTotal) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const sorted = snapshots.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  const beforeMonth = sorted.filter((s) => new Date(s.date) < monthStart).pop();
+  const firstInMonth = sorted.find((s) => new Date(s.date) >= monthStart);
+  const baseline = beforeMonth || firstInMonth;
+  if (!baseline || baseline.totalValueCny === 0) {
+    return { text: "暂无数据", cls: "flat" };
+  }
+  const percent = roundMoney(((currentTotal - baseline.totalValueCny) / baseline.totalValueCny) * 100);
+  const prefix = percent >= 0 ? "+" : "";
+  return {
+    text: `${prefix}${formatPercent(percent)}`,
+    cls: percent > 0 ? "up" : percent < 0 ? "down" : "flat"
+  };
+}
+
 // ---------- asset model ----------
 const CATEGORIES = [
   { code: "cash", name: "现金" },
@@ -232,55 +271,6 @@ function seedIfEmpty() {
 }
 
 // ---------- charts ----------
-function drawPieChart(canvas, segments) {
-  const ctx = canvas.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-
-  const cx = w / 2;
-  const cy = h / 2;
-  const radius = Math.min(w, h) / 2 - 12;
-  const total = segments.reduce((s, i) => s + i.value, 0);
-
-  if (!total) {
-    ctx.fillStyle = "#e5e7eb";
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-
-  let start = -Math.PI / 2;
-  segments.forEach((seg, i) => {
-    const angle = (seg.value / total) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.fillStyle = COLORS[i % COLORS.length];
-    ctx.arc(cx, cy, radius, start, start + angle);
-    ctx.closePath();
-    ctx.fill();
-    start += angle;
-  });
-  ctx.beginPath();
-  ctx.fillStyle = "#ffffff";
-  ctx.arc(cx, cy, radius * 0.58, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#1f2937";
-  ctx.font = "600 14px -apple-system, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("分类", cx, cy - 8);
-  ctx.fillStyle = "#7a8499";
-  ctx.font = "12px -apple-system, sans-serif";
-  ctx.fillText(`${segments.length} 类`, cx, cy + 10);
-}
-
 function drawTrendChart(canvas, points) {
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
@@ -360,11 +350,51 @@ function firstChar(value) {
   return String(value || "").trim().slice(0, 1) || "资";
 }
 
+function closeCurrencySheet() {
+  document.querySelector(".sheet-overlay")?.remove();
+}
+
+function openCurrencySheet() {
+  closeCurrencySheet();
+  const device = document.querySelector(".device");
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  overlay.innerHTML = `
+    <div class="action-sheet" role="dialog" aria-label="选择显示币种">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">选择显示币种</div>
+      ${DISPLAY_CURRENCIES.map((code) => {
+        const item = getCurrency(code);
+        const active = code === displayCurrency ? " active" : "";
+        return `<button class="sheet-option${active}" data-currency="${code}">
+          <span>${item.name}</span>
+          <span class="sheet-code">${code}</span>
+        </button>`;
+      }).join("")}
+    </div>
+  `;
+  device.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add("open"));
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeCurrencySheet();
+  });
+  overlay.querySelectorAll("[data-currency]").forEach((btn) => {
+    btn.onclick = () => {
+      displayCurrency = btn.dataset.currency;
+      setDisplayCurrency(displayCurrency);
+      closeCurrencySheet();
+      if (currentTab === "dashboard") renderDashboard();
+    };
+  });
+}
+
 // ---------- views ----------
 const view = document.getElementById("view");
 const statusTitle = document.querySelector(".status-right");
 let currentTab = "dashboard";
 let editingId = null;
+let displayCurrency = getDisplayCurrency();
 const TAB_TITLES = {
   dashboard: "资产总览",
   assets: "资产账户",
@@ -377,47 +407,30 @@ function renderDashboard() {
   const assets = getAssets();
   const snapshots = getSnapshots();
   const summary = summarizeAssets(assets);
-  const latest = snapshots[snapshots.length - 1];
   const categorySegments = decorateSegments(summary.categorySegments);
   const currencySegments = decorateSegments(summary.currencySegments);
   const trendPoints = buildTrendPoints(snapshots).slice(-8);
-  const topCategory = categorySegments[0];
-  const topCurrency = currencySegments[0];
-
-  let deltaText = "暂无变化记录";
-  if (latest) {
-    const prefix = latest.deltaCny >= 0 ? "+" : "";
-    deltaText = `较上次 ${prefix}${formatMoney(latest.deltaCny)} (${prefix}${formatPercent(latest.deltaPercent)})`;
-  }
+  const monthGrowth = calcMonthGrowth(snapshots, summary.totalValueCny);
 
   view.innerHTML = `
     <div class="hero-card">
-      <div class="hero-top">
-        <div>
-          <div class="hero-title">总资产</div>
-        </div>
-        <div class="hero-pill">${assets.length} 个账户</div>
-      </div>
-      <div class="total">${formatMoney(summary.totalValueCny)}</div>
-      <div class="delta">${deltaText}</div>
-      <div class="hero-stat-grid">
-        <div class="hero-stat">
-          <div class="label">主力分类</div>
-          <div class="value">${topCategory ? topCategory.name : "暂无"}</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">主币种</div>
-          <div class="value">${topCurrency ? topCurrency.name : "暂无"}</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">快照</div>
-          <div class="value">${snapshots.length} 条</div>
+      <div class="hero-sheen"></div>
+      <div class="hero-body">
+        <div class="hero-title">总资产</div>
+        <div class="hero-metrics">
+          <div class="total">
+            <span class="total-amount">${formatDisplayAmount(summary.totalValueCny, displayCurrency)}</span>
+            <button class="currency-trigger" data-act="openCurrencySheet" aria-label="切换显示币种">
+              <span class="currency-code">${displayCurrency}</span>
+              <span class="currency-chevron" aria-hidden="true">▾</span>
+            </button>
+          </div>
+          <button class="hero-add-btn" data-act="create" aria-label="新增资产">+</button>
+          <div class="hero-divider"></div>
+          <span class="hero-growth-label">本月增长率</span>
+          <span class="hero-growth-value ${monthGrowth.cls}">${monthGrowth.text}</span>
         </div>
       </div>
-    </div>
-    <div class="quick-actions">
-      <button class="btn button-primary" data-act="create">+ 新增资产</button>
-      <button class="btn button-secondary" data-act="goAssets">查看明细</button>
     </div>
     <div class="card trend-summary">
       <div class="section-header">
@@ -426,16 +439,39 @@ function renderDashboard() {
           <div class="section-subtitle">按人民币折算后的资产结构</div>
         </div>
       </div>
-      <canvas id="pie" class="chart"></canvas>
-      ${categorySegments.length ? "" : '<div class="empty-small">暂无资产数据</div>'}
-      ${categorySegments
-        .map(
-          (i) => `<div class="legend-row">
-            <div class="legend-left"><span class="legend-dot" style="background:${i.color}"></span>${i.name}</div>
-            <span>${i.percent}% · ${i.valueText}</span>
-          </div>`
-        )
-        .join("")}
+      ${
+        categorySegments.length
+          ? `<div class="storage-bar" role="img" aria-label="分类占比条形图">
+              ${categorySegments
+                .map(
+                  (i) =>
+                    `<span class="storage-segment" style="width:${i.percent}%;background:${i.color}" title="${i.name} ${i.percent}%"></span>`
+                )
+                .join("")}
+            </div>
+            <div class="storage-legend">
+              ${categorySegments
+                .map(
+                  (i) =>
+                    `<span class="storage-legend-item"><span class="storage-legend-dot" style="background:${i.color}"></span>${i.name}</span>`
+                )
+                .join("")}
+            </div>
+            <div class="storage-list">
+              ${categorySegments
+                .map(
+                  (i) => `<div class="storage-row" data-category="${i.code}" role="button" tabindex="0" aria-label="编辑${i.name}">
+                    <div class="storage-row-main">
+                      <div class="storage-row-name">${i.name}<span class="storage-row-chevron" aria-hidden="true">›</span></div>
+                      <div class="muted storage-row-meta">${i.percent}%</div>
+                    </div>
+                    <div class="storage-row-value">${i.valueText}</div>
+                  </div>`
+                )
+                .join("")}
+            </div>`
+          : '<div class="empty-small">暂无资产数据</div>'
+      }
     </div>
     <div class="card">
       <div class="section-title">币种分布</div>
@@ -464,12 +500,25 @@ function renderDashboard() {
     </div>
   `;
 
-  if (categorySegments.length) drawPieChart(view.querySelector("#pie"), categorySegments);
   if (trendPoints.length) drawTrendChart(view.querySelector("#trend"), trendPoints);
 
-  view.querySelector('[data-act="create"]').onclick = () => openForm(null);
-  view.querySelector('[data-act="goAssets"]').onclick = () => switchTab("assets");
+  view.querySelector('[data-act="create"]').onclick = () => openForm(null, { returnTab: "dashboard" });
   view.querySelector('[data-act="goTrends"]').onclick = () => switchTab("trends");
+  view.querySelector('[data-act="openCurrencySheet"]').onclick = openCurrencySheet;
+  view.querySelectorAll(".storage-row").forEach((row) => {
+    row.onclick = () => openCategoryAsset(row.dataset.category);
+  });
+}
+
+function openCategoryAsset(categoryCode) {
+  const assets = getAssets()
+    .filter((a) => a.category === categoryCode)
+    .sort((a, b) => b.valueCny - a.valueCny);
+  if (assets.length) {
+    openForm(assets[0].id, { returnTab: "dashboard" });
+    return;
+  }
+  openForm(null, { category: categoryCode, returnTab: "dashboard" });
 }
 
 function renderAssets() {
@@ -493,7 +542,7 @@ function renderAssets() {
       assets.length
         ? ""
         : `<div class="card empty"><div>还没有资产记录</div>
-            <button class="btn button-primary" style="margin-top:14px" data-act="create">添加第一笔资产</button></div>`
+            <button class="btn button-primary" style="margin-top:16px" data-act="create">添加第一笔资产</button></div>`
     }
     ${assets
       .map(
@@ -520,10 +569,19 @@ function renderAssets() {
   view.querySelectorAll(".asset-card").forEach((c) => (c.onclick = () => openForm(c.dataset.id)));
 }
 
-function openForm(id) {
+function openForm(id, options = {}) {
+  const returnTab = options.returnTab || "assets";
+  const defaultCategory = options.category;
   editingId = id;
   const asset = id ? getAssets().find((a) => a.id === id) : null;
-  const form = asset || { name: "", category: "cash", currency: "CNY", amount: "", exchangeRateToCny: 1, note: "" };
+  const form = asset || {
+    name: "",
+    category: defaultCategory || "cash",
+    currency: "CNY",
+    amount: "",
+    exchangeRateToCny: 1,
+    note: ""
+  };
 
   view.innerHTML = `
     <div class="form-page">
@@ -556,7 +614,7 @@ function openForm(id) {
     </div>
   `;
 
-  view.querySelector('[data-act="back"]').onclick = () => switchTab("assets");
+  view.querySelector('[data-act="back"]').onclick = () => switchTab(returnTab);
   view.querySelector("#f-currency").onchange = (e) => {
     view.querySelector("#f-rate").value = getDefaultRate(e.target.value);
   };
@@ -576,14 +634,14 @@ function openForm(id) {
       return;
     }
     upsertAsset(next);
-    switchTab("assets");
+    switchTab(returnTab);
   };
   const delBtn = view.querySelector('[data-act="delete"]');
   if (delBtn)
     delBtn.onclick = () => {
       if (confirm("删除后会更新资产快照，确定继续吗？")) {
         deleteAsset(id);
-        switchTab("assets");
+        switchTab(returnTab);
       }
     };
 }
@@ -714,6 +772,7 @@ const renderers = {
 };
 
 function switchTab(tab) {
+  closeCurrencySheet();
   currentTab = tab;
   statusTitle.textContent = TAB_TITLES[tab] || "资产总览";
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
