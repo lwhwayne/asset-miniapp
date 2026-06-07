@@ -1,0 +1,61 @@
+.asset-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.title {
+  margin-bottom: 8rpx;
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.add-button {
+  width: 156rpx;
+  margin: 0;
+  font-size: 28rpx;
+}
+
+.empty-button {
+  width: 280rpx;
+  margin-top: 28rpx;
+  font-size: 28rpx;
+}
+
+.asset-card {
+  padding: 30rpx;
+}
+
+.asset-top,
+.asset-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.asset-name {
+  margin-bottom: 8rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+}
+
+.asset-value {
+  color: #111827;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.asset-meta {
+  margin-top: 24rpx;
+  color: #7a8499;
+  font-size: 24rpx;
+}
+
+.asset-note {
+  margin-top: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid #edf0f5;
+  color: #4b5563;
+  font-size: 26rpx;
+}

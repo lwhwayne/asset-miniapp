@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>资产总览 · 预览</title>
+  <link rel="stylesheet" href="./preview.css" />
+</head>
+<body>
+  <div class="device-wrap">
+    <div class="device">
+      <div class="status-bar">
+        <span>9:41</span>
+        <span class="status-right">资产总览</span>
+      </div>
+
+      <main id="view" class="view"></main>
+
+      <nav class="tab-bar">
+        <button class="tab-item" data-tab="dashboard">
+          <span class="tab-icon">概览</span>
+        </button>
+        <button class="tab-item" data-tab="assets">
+          <span class="tab-icon">资产</span>
+        </button>
+        <button class="tab-item" data-tab="trends">
+          <span class="tab-icon">趋势</span>
+        </button>
+        <button class="tab-item" data-tab="settings">
+          <span class="tab-icon">设置</span>
+        </button>
+      </nav>
+    </div>
+    <p class="preview-hint">网页预览版 · 修改 web-preview 下文件保存后自动刷新</p>
+  </div>
+
+  <script src="./preview.js"></script>
+  <script src="./livereload.js"></script>
+</body>
+</html>

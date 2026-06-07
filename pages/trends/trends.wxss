@@ -1,0 +1,55 @@
+.section-title {
+  margin-bottom: 18rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.chart {
+  width: 100%;
+  height: 260px;
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid #edf0f5;
+}
+
+.snapshot-row:last-child {
+  border-bottom: 0;
+}
+
+.snapshot-date {
+  margin-bottom: 8rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.delta-up,
+.delta-down {
+  text-align: right;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.delta-up {
+  color: #16a34a;
+}
+
+.delta-down {
+  color: #dc2626;
+}
+
+.delta-percent {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+}
+
+.empty-small {
+  padding: 24rpx 0;
+  color: #7a8499;
+  text-align: center;
+  font-size: 26rpx;
+}

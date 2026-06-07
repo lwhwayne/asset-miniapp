@@ -1,0 +1,20 @@
+<view class="page">
+  <view class="card">
+    <view class="title">数据备份</view>
+    <view class="muted desc">首版数据仅保存在本机小程序缓存，建议定期导出备份。</view>
+    <button class="button-primary action-button" bindtap="copyExportData">导出到剪贴板</button>
+  </view>
+
+  <view class="card">
+    <view class="title">导入备份</view>
+    <view class="muted desc">粘贴此前导出的 JSON，导入后会覆盖当前本地数据。</view>
+    <textarea value="{{importText}}" placeholder="粘贴备份 JSON" bindinput="onImportInput"></textarea>
+    <button class="button-secondary action-button" bindtap="confirmImport">导入数据</button>
+  </view>
+
+  <view class="card danger-card">
+    <view class="title">清空数据</view>
+    <view class="muted desc">删除本机保存的所有资产和历史快照。</view>
+    <button class="danger-button" bindtap="confirmClear">清空本地数据</button>
+  </view>
+</view>

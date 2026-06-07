@@ -1,0 +1,41 @@
+.form-card {
+  padding-bottom: 8rpx;
+}
+
+.field {
+  margin-bottom: 30rpx;
+}
+
+.label {
+  margin-bottom: 14rpx;
+  color: #4b5563;
+  font-size: 26rpx;
+}
+
+input,
+textarea,
+.picker-value {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 18rpx;
+  background: #f7f8fb;
+  color: #111827;
+  font-size: 30rpx;
+}
+
+textarea {
+  height: 160rpx;
+}
+
+.save-button,
+.delete-button {
+  margin-top: 24rpx;
+  border-radius: 999rpx;
+}
+
+.delete-button {
+  background: #fff1f2;
+  color: #e11d48;
+}

@@ -1,0 +1,51 @@
+<view class="page">
+  <view class="hero-card">
+    <view class="muted">总资产折合人民币</view>
+    <view class="total">{{totalValueText}}</view>
+    <view class="delta {{latestDeltaClass}}">
+      {{latestDeltaText}}
+    </view>
+  </view>
+
+  <view class="quick-actions">
+    <button class="button-primary" bindtap="goCreateAsset">新增资产</button>
+    <button class="button-secondary" bindtap="goAssets">查看明细</button>
+  </view>
+
+  <view class="card">
+    <view class="section-title">分类占比</view>
+    <canvas canvas-id="categoryPie" class="chart"></canvas>
+    <view wx:if="{{!categorySegments.length}}" class="empty-small">暂无资产数据</view>
+    <view wx:for="{{categorySegments}}" wx:key="code" class="legend-row">
+      <view class="legend-left">
+        <view class="legend-dot" style="background: {{item.color}};"></view>
+        <text>{{item.name}}</text>
+      </view>
+      <text>{{item.percent}}% · {{item.valueText}}</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">币种分布</view>
+    <view wx:for="{{currencySegments}}" wx:key="code" class="ratio-row">
+      <view class="ratio-info">
+        <text>{{item.name}}</text>
+        <text class="muted">{{item.percent}}%</text>
+      </view>
+      <view class="ratio-track">
+        <view class="ratio-bar" style="width: {{item.percent}}%;"></view>
+      </view>
+      <view class="ratio-value">{{item.valueText}}</view>
+    </view>
+    <view wx:if="{{!currencySegments.length}}" class="empty-small">暂无币种数据</view>
+  </view>
+
+  <view class="card">
+    <view class="section-header">
+      <view class="section-title">资产趋势</view>
+      <text class="link" bindtap="goTrends">更多</text>
+    </view>
+    <canvas canvas-id="trendChart" class="chart"></canvas>
+    <view wx:if="{{!trendPoints.length}}" class="empty-small">新增资产后会自动记录趋势</view>
+  </view>
+</view>

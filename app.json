@@ -1,0 +1,40 @@
+{
+  "pages": [
+    "pages/dashboard/dashboard",
+    "pages/assets/assets",
+    "pages/asset-form/asset-form",
+    "pages/trends/trends",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "navigationBarTitleText": "资产总览",
+    "navigationBarBackgroundColor": "#f7f8fb",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f8fb"
+  },
+  "tabBar": {
+    "color": "#7a8499",
+    "selectedColor": "#1f6feb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/dashboard/dashboard",
+        "text": "总览"
+      },
+      {
+        "pagePath": "pages/assets/assets",
+        "text": "资产"
+      },
+      {
+        "pagePath": "pages/trends/trends",
+        "text": "趋势"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "设置"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

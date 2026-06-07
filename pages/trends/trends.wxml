@@ -1,0 +1,22 @@
+<view class="page">
+  <view class="card">
+    <view class="section-title">总资产变化</view>
+    <canvas canvas-id="fullTrendChart" class="chart"></canvas>
+    <view wx:if="{{!trendPoints.length}}" class="empty-small">暂无趋势数据</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">历史快照</view>
+    <view wx:for="{{snapshots}}" wx:key="id" class="snapshot-row">
+      <view>
+        <view class="snapshot-date">{{item.dateText}}</view>
+        <view class="muted">{{item.totalText}}</view>
+      </view>
+      <view class="{{item.deltaClass}}">
+        <view>{{item.deltaText}}</view>
+        <view class="delta-percent">{{item.deltaPercentText}}</view>
+      </view>
+    </view>
+    <view wx:if="{{!snapshots.length}}" class="empty-small">新增或修改资产后自动生成快照</view>
+  </view>
+</view>

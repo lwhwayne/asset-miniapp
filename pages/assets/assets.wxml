@@ -1,0 +1,29 @@
+<view class="page">
+  <view class="asset-header">
+    <view>
+      <view class="title">资产账户</view>
+      <view class="muted">维护支付宝、现金、券商、保险等资产</view>
+    </view>
+    <button class="add-button button-primary" bindtap="goCreate">新增</button>
+  </view>
+
+  <view wx:if="{{!assets.length}}" class="card empty">
+    <view>还没有资产记录</view>
+    <button class="button-primary empty-button" bindtap="goCreate">添加第一笔资产</button>
+  </view>
+
+  <view wx:for="{{assets}}" wx:key="id" class="card asset-card" bindtap="goEdit" data-id="{{item.id}}">
+    <view class="asset-top">
+      <view>
+        <view class="asset-name">{{item.name}}</view>
+        <view class="muted">{{item.categoryName}} · {{item.currency}}</view>
+      </view>
+      <view class="asset-value">{{item.valueCnyText}}</view>
+    </view>
+    <view class="asset-meta">
+      <text>{{item.amountText}}</text>
+      <text>汇率 {{item.exchangeRateToCny}}</text>
+    </view>
+    <view wx:if="{{item.note}}" class="asset-note">{{item.note}}</view>
+  </view>
+</view>
