@@ -53,12 +53,26 @@ function convertFromCny(amountCny, targetCode) {
   const rate = getDefaultRate(targetCode);
   return rate > 0 ? roundMoney(amountCny / rate) : 0;
 }
-function formatDisplayAmount(totalCny, code) {
+function formatDisplayAmount(totalCny, code = getActiveDisplayCurrency()) {
   const amount = convertFromCny(totalCny, code);
   return amount.toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
+}
+function getActiveDisplayCurrency() {
+  return displayCurrency || getDisplayCurrency();
+}
+function formatDisplayMoney(amountCny, currency = getActiveDisplayCurrency()) {
+  return formatMoney(convertFromCny(amountCny, currency), currency);
+}
+function convertDisplayToNative(displayAmount, displayCode, nativeCurrency) {
+  const amountCny = toCny(displayAmount, getDefaultRate(displayCode));
+  const nativeRate = getDefaultRate(nativeCurrency);
+  return nativeRate > 0 ? roundMoney(amountCny / nativeRate) : 0;
+}
+function toDisplayAmount(amountCny, currency = getActiveDisplayCurrency()) {
+  return convertFromCny(amountCny, currency);
 }
 function calcMonthGrowth(snapshots, currentTotal) {
   const now = new Date();
@@ -118,43 +132,167 @@ function getGrowthDisplay(monthGrowth, metric, currency) {
 
 // ---------- asset model ----------
 const CATEGORIES = [
-  { code: "cash", name: "现金" },
-  { code: "payment", name: "支付账户" },
-  { code: "brokerage", name: "证券" },
+  { code: "stock", name: "股票" },
   { code: "fund", name: "基金" },
+  { code: "gold", name: "黄金" },
+  { code: "cash", name: "现金" },
   { code: "insurance", name: "保险" },
-  { code: "other", name: "其他" }
+  { code: "housing", name: "公积金" }
 ];
-const COLORS = ["#155eef", "#16a34a", "#f59e0b", "#8b5cf6", "#0ea5e9", "#ef4444", "#64748b"];
+const CATEGORY_LEGACY_MAP = {
+  brokerage: "stock",
+  payment: "cash",
+  other: "cash"
+};
+const COLORS = ["#155eef", "#16a34a", "#f59e0b", "#8b5cf6", "#0ea5e9", "#ef4444"];
+const RECURRING_INTERVALS = [
+  { code: "day", label: "每天" },
+  { code: "week", label: "每周" },
+  { code: "month", label: "每月" },
+  { code: "year", label: "每年" }
+];
 
 function createId(prefix = "asset") {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 }
+function resolveCategoryCode(code) {
+  if (CATEGORIES.some((c) => c.code === code)) return code;
+  return CATEGORY_LEGACY_MAP[code] || "cash";
+}
 function getCategory(code) {
-  return CATEGORIES.find((c) => c.code === code) || CATEGORIES[CATEGORIES.length - 1];
+  return CATEGORIES.find((c) => c.code === resolveCategoryCode(code));
+}
+function migrateCategoryValues(values = {}) {
+  const result = {};
+  Object.keys(values).forEach((code) => {
+    const nextCode = resolveCategoryCode(code);
+    result[nextCode] = roundMoney((result[nextCode] || 0) + values[code]);
+  });
+  return result;
+}
+function normalizeRecurring(input) {
+  if (!input?.enabled) {
+    return { enabled: false, interval: "month", amount: 0, lastAppliedAt: null };
+  }
+  const interval = RECURRING_INTERVALS.some((i) => i.code === input.interval) ? input.interval : "month";
+  return {
+    enabled: true,
+    interval,
+    amount: roundMoney(input.amount),
+    lastAppliedAt: input.lastAppliedAt || null
+  };
+}
+function mergeRecurringOnSave(prev, formRecurring) {
+  const normalized = normalizeRecurring(formRecurring);
+  if (!normalized.enabled) return normalized;
+  const prevRecurring = prev?.recurring;
+  if (
+    prevRecurring?.enabled &&
+    prevRecurring.interval === normalized.interval &&
+    prevRecurring.amount === normalized.amount &&
+    prevRecurring.lastAppliedAt
+  ) {
+    return { ...normalized, lastAppliedAt: prevRecurring.lastAppliedAt };
+  }
+  return { ...normalized, lastAppliedAt: new Date().toISOString() };
+}
+function countElapsedPeriods(fromDate, toDate, interval) {
+  if (toDate <= fromDate) return 0;
+  if (interval === "day") {
+    return Math.floor((toDate - fromDate) / (24 * 60 * 60 * 1000));
+  }
+  if (interval === "week") {
+    return Math.floor((toDate - fromDate) / (7 * 24 * 60 * 60 * 1000));
+  }
+  if (interval === "month") {
+    let count = 0;
+    let cursor = new Date(fromDate);
+    while (true) {
+      const next = new Date(cursor);
+      next.setMonth(next.getMonth() + 1);
+      if (next > toDate) break;
+      count++;
+      cursor = next;
+    }
+    return count;
+  }
+  if (interval === "year") {
+    let count = 0;
+    let cursor = new Date(fromDate);
+    while (true) {
+      const next = new Date(cursor);
+      next.setFullYear(next.getFullYear() + 1);
+      if (next > toDate) break;
+      count++;
+      cursor = next;
+    }
+    return count;
+  }
+  return 0;
+}
+function advanceByPeriods(fromDate, interval, periods) {
+  const d = new Date(fromDate);
+  if (interval === "day") d.setDate(d.getDate() + periods);
+  else if (interval === "week") d.setDate(d.getDate() + periods * 7);
+  else if (interval === "month") d.setMonth(d.getMonth() + periods);
+  else if (interval === "year") d.setFullYear(d.getFullYear() + periods);
+  return d;
+}
+function applyRecurringToAsset(asset) {
+  const recurring = asset.recurring;
+  if (!recurring?.enabled || recurring.amount <= 0) return asset;
+  const now = new Date();
+  const anchor = recurring.lastAppliedAt || asset.updatedAt;
+  const lastApplied = new Date(anchor);
+  const periods = countElapsedPeriods(lastApplied, now, recurring.interval);
+  if (periods <= 0) return asset;
+  const addAmount = roundMoney(recurring.amount * periods);
+  const newLastApplied = advanceByPeriods(lastApplied, recurring.interval, periods).toISOString();
+  return normalizeAsset({
+    ...asset,
+    amount: roundMoney(asset.amount + addAmount),
+    recurring: { ...recurring, lastAppliedAt: newLastApplied },
+    updatedAt: new Date().toISOString()
+  });
+}
+function formatRecurringSummary(recurring, nativeCurrency = "CNY") {
+  if (!recurring?.enabled || recurring.amount <= 0) return "";
+  const interval = RECURRING_INTERVALS.find((i) => i.code === recurring.interval);
+  const amountCny = toCny(recurring.amount, getDefaultRate(nativeCurrency));
+  return `${interval?.label || ""} +${formatDisplayMoney(amountCny)}`;
 }
 function normalizeAsset(input = {}) {
   const now = new Date().toISOString();
   const currency = input.currency || "CNY";
-  const rate = toNumber(input.exchangeRateToCny, getDefaultRate(currency));
+  const rate = getDefaultRate(currency);
   const amount = roundMoney(input.amount);
   return {
     id: input.id || createId(),
     name: String(input.name || "").trim(),
-    category: input.category || "other",
+    category: resolveCategoryCode(input.category || "cash"),
     currency,
     amount,
     exchangeRateToCny: rate,
     valueCny: toCny(amount, rate),
     updatedAt: input.updatedAt || now,
-    note: String(input.note || "").trim()
+    recurring: normalizeRecurring(input.recurring)
   };
 }
 function validateAsset(asset) {
   if (!asset.name) return "请输入资产名称";
   if (asset.amount < 0) return "资产金额不能小于 0";
-  if (asset.exchangeRateToCny <= 0) return "汇率必须大于 0";
   return "";
+}
+function readRecurringFromForm(view, nativeCurrency) {
+  const recurringToggle = view.querySelector("#f-recurring-enabled");
+  if (!recurringToggle?.checked) return { enabled: false };
+  const displayAmount = toNumber(view.querySelector("#f-recurring-amount").value);
+  if (displayAmount <= 0) return { enabled: false };
+  return {
+    enabled: true,
+    interval: view.querySelector("#f-recurring-interval").value,
+    amount: convertDisplayToNative(displayAmount, getActiveDisplayCurrency(), nativeCurrency)
+  };
 }
 function buildSegments(values, labeled) {
   const entries = Object.keys(values).map((code) => ({
@@ -237,27 +375,38 @@ function readJson(key, fallback) {
 function writeJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
-function getAssets() {
+function loadAssetsRaw() {
   return readJson(ASSETS_KEY, []).map((a) => normalizeAsset(a));
 }
-function getSnapshots() {
-  return readJson(SNAPSHOTS_KEY, []);
-}
-function recordSnapshotIfNeeded() {
-  const assets = getAssets();
+function recordSnapshotForAssets(assets) {
   const snapshots = getSnapshots();
   const latest = snapshots[snapshots.length - 1];
   if (!shouldCreateSnapshot(assets, latest)) return;
   const snapshot = createSnapshot(assets, latest);
   writeJson(SNAPSHOTS_KEY, snapshots.concat(snapshot).slice(-120));
 }
+function getAssets() {
+  const raw = loadAssetsRaw();
+  const applied = raw.map(applyRecurringToAsset);
+  if (JSON.stringify(applied) !== JSON.stringify(raw)) {
+    writeJson(ASSETS_KEY, applied);
+    recordSnapshotForAssets(applied);
+  }
+  return applied;
+}
+function getSnapshots() {
+  return readJson(SNAPSHOTS_KEY, []);
+}
 function saveAssets(assets) {
-  writeJson(ASSETS_KEY, assets.map((a) => normalizeAsset(a)));
-  recordSnapshotIfNeeded();
+  const normalized = assets.map((a) => normalizeAsset(a));
+  writeJson(ASSETS_KEY, normalized);
+  recordSnapshotForAssets(normalized);
 }
 function upsertAsset(input) {
-  const next = normalizeAsset({ ...input, updatedAt: new Date().toISOString() });
   const assets = getAssets();
+  const prev = assets.find((a) => a.id === input.id);
+  const recurring = mergeRecurringOnSave(prev, input.recurring);
+  const next = normalizeAsset({ ...input, recurring, updatedAt: new Date().toISOString() });
   const idx = assets.findIndex((a) => a.id === next.id);
   if (idx >= 0) assets[idx] = next;
   else assets.unshift(next);
@@ -271,16 +420,43 @@ function clearAllData() {
   localStorage.removeItem(ASSETS_KEY);
   localStorage.removeItem(SNAPSHOTS_KEY);
 }
+function migrateStoredDataIfNeeded() {
+  const assets = readJson(ASSETS_KEY, null);
+  if (assets) {
+    const migratedAssets = assets.map((a) => {
+      const category = resolveCategoryCode(a.category);
+      return category === a.category ? a : { ...a, category };
+    });
+    if (JSON.stringify(migratedAssets) !== JSON.stringify(assets)) {
+      writeJson(ASSETS_KEY, migratedAssets);
+    }
+  }
+
+  const snapshots = readJson(SNAPSHOTS_KEY, null);
+  if (snapshots) {
+    const migratedSnapshots = snapshots.map((s) => {
+      const categoryValues = migrateCategoryValues(s.categoryValues || {});
+      if (JSON.stringify(categoryValues) === JSON.stringify(s.categoryValues || {})) return s;
+      return { ...s, categoryValues };
+    });
+    if (JSON.stringify(migratedSnapshots) !== JSON.stringify(snapshots)) {
+      writeJson(SNAPSHOTS_KEY, migratedSnapshots);
+    }
+  }
+}
 
 // ---------- seed sample data on first run ----------
 function seedIfEmpty() {
   if (readJson(ASSETS_KEY, null)) return;
   const sample = [
-    { name: "支付宝余额", category: "payment", currency: "CNY", amount: 18650, exchangeRateToCny: 1 },
+    { name: "富途港股账户", category: "stock", currency: "HKD", amount: 86000, exchangeRateToCny: 0.92 },
+    { name: "指数基金", category: "fund", currency: "CNY", amount: 60000, exchangeRateToCny: 1 },
+    { name: "积存金", category: "gold", currency: "CNY", amount: 15000, exchangeRateToCny: 1 },
+    { name: "支付宝余额", category: "cash", currency: "CNY", amount: 18650, exchangeRateToCny: 1 },
     { name: "现金港币", category: "cash", currency: "HKD", amount: 42000, exchangeRateToCny: 0.92 },
-    { name: "富途港股账户", category: "brokerage", currency: "HKD", amount: 86000, exchangeRateToCny: 0.92 },
     { name: "招商银行活期", category: "cash", currency: "CNY", amount: 32000, exchangeRateToCny: 1 },
-    { name: "重疾险现金价值", category: "insurance", currency: "CNY", amount: 26000, exchangeRateToCny: 1 }
+    { name: "重疾险现金价值", category: "insurance", currency: "CNY", amount: 26000, exchangeRateToCny: 1 },
+    { name: "住房公积金", category: "housing", currency: "CNY", amount: 48000, recurring: { enabled: true, interval: "month", amount: 2400 } }
   ].map((a) => normalizeAsset(a));
   writeJson(ASSETS_KEY, sample);
 
@@ -375,11 +551,88 @@ function el(html) {
   return t.content.firstChild;
 }
 function decorateSegments(segments) {
-  return segments.map((item, i) => ({
+  return segments.map((item) => {
+    const categoryIndex = CATEGORIES.findIndex((c) => c.code === item.code);
+    return {
+      ...item,
+      color: COLORS[categoryIndex >= 0 ? categoryIndex % COLORS.length : 0],
+      valueText: formatDisplayMoney(item.value)
+    };
+  });
+}
+function decorateAssetSegments(segments) {
+  return segments.map((item, index) => ({
     ...item,
-    color: COLORS[i % COLORS.length],
-    valueText: formatMoney(item.value)
+    color: COLORS[index % COLORS.length],
+    valueText: formatDisplayMoney(item.value)
   }));
+}
+function buildAssetSegments(assets = []) {
+  const entries = assets.map((a) => ({
+    code: a.id,
+    name: a.name,
+    amount: roundMoney(a.amount),
+    currency: a.currency,
+    value: roundMoney(a.valueCny)
+  }));
+  const chartTotal = entries.reduce(
+    (sum, item) => roundMoney(sum + (item.value > 0 ? item.value : 0)),
+    0
+  );
+  return entries
+    .sort((a, b) => b.value - a.value)
+    .map((item) => ({
+      ...item,
+      percent: chartTotal > 0 && item.value > 0 ? roundMoney((item.value / chartTotal) * 100) : 0
+    }));
+}
+function buildStorageBreakdownMarkup(segments, options = {}) {
+  const { dataAttr = "category", ariaPrefix = "查看", emptyText = "暂无数据", listAll = false } = options;
+  const chartSegments = segments.filter((i) => i.value > 0);
+  const listSegments = listAll ? segments : chartSegments;
+  if (!listSegments.length) return `<div class="empty-small">${emptyText}</div>`;
+  return `
+    <div class="storage-bar" role="img" aria-label="占比条形图">
+      ${chartSegments
+        .map(
+          (i) =>
+            `<span class="storage-segment" style="width:${i.percent}%;background:${i.color}" title="${i.name} ${i.percent}%"></span>`
+        )
+        .join("")}
+    </div>
+    <div class="storage-legend">
+      ${chartSegments
+        .map(
+          (i) =>
+            `<span class="storage-legend-item"><span class="storage-legend-dot" style="background:${i.color}"></span>${i.name}</span>`
+        )
+        .join("")}
+    </div>
+    <div class="storage-list">
+      ${listSegments
+        .map(
+          (i) =>
+            `<div class="storage-row" data-${dataAttr}="${i.code}" role="button" tabindex="0" aria-label="${ariaPrefix}${i.name}">
+              <div class="storage-row-main">
+                <div class="storage-row-name">${i.name}<span class="storage-row-chevron" aria-hidden="true">›</span></div>
+                <div class="muted storage-row-meta">${i.percent}%</div>
+              </div>
+              <div class="storage-row-value">${i.valueText}</div>
+            </div>`
+        )
+        .join("")}
+    </div>`;
+}
+function navigateAfterForm(options = {}) {
+  const returnTab = options.returnTab || "assets";
+  if (returnTab === "category") {
+    const categoryCode = options.categoryCode || options.category;
+    if (categoryCode) {
+      renderCategoryDetail(categoryCode);
+      return;
+    }
+  }
+  switchTab(returnTab);
 }
 function pad2(v) {
   return String(v).padStart(2, "0");
@@ -388,8 +641,19 @@ function firstChar(value) {
   return String(value || "").trim().slice(0, 1) || "资";
 }
 
-function closeOverlaySheet() {
-  document.querySelector(".sheet-overlay")?.remove();
+function rerenderCurrentView() {
+  if (view.querySelector(".form-page")) {
+    const nav = activeFormNavigation || { returnTab: currentTab };
+    if (editingId) openForm(editingId, nav);
+    else openForm(null, nav);
+    return;
+  }
+  if (activeCategoryCode) {
+    renderCategoryDetail(activeCategoryCode);
+    return;
+  }
+  const renderer = renderers[currentTab];
+  if (renderer) renderer();
 }
 
 function openCurrencySheet() {
@@ -422,9 +686,13 @@ function openCurrencySheet() {
       displayCurrency = btn.dataset.currency;
       setDisplayCurrency(displayCurrency);
       closeOverlaySheet();
-      if (currentTab === "dashboard") renderDashboard();
+      rerenderCurrentView();
     };
   });
+}
+
+function closeOverlaySheet() {
+  document.querySelector(".sheet-overlay")?.remove();
 }
 
 function openGrowthSheet() {
@@ -465,6 +733,8 @@ const view = document.getElementById("view");
 const statusTitle = document.querySelector(".status-right");
 let currentTab = "dashboard";
 let editingId = null;
+let activeCategoryCode = null;
+let activeFormNavigation = null;
 let displayCurrency = getDisplayCurrency();
 let growthMetric = getGrowthMetric();
 const TAB_TITLES = {
@@ -475,8 +745,8 @@ const TAB_TITLES = {
 };
 
 function renderDashboard() {
-  recordSnapshotIfNeeded();
   const assets = getAssets();
+  recordSnapshotForAssets(assets);
   const snapshots = getSnapshots();
   const summary = summarizeAssets(assets);
   const categorySegments = decorateSegments(summary.categorySegments);
@@ -512,40 +782,16 @@ function renderDashboard() {
       <div class="section-header">
         <div>
           <div class="section-title">分类占比</div>
-          <div class="section-subtitle">按人民币折算后的资产结构</div>
+          <div class="section-subtitle">按当前显示币种折算后的资产结构</div>
         </div>
       </div>
       ${
         categorySegments.length
-          ? `<div class="storage-bar" role="img" aria-label="分类占比条形图">
-              ${categorySegments
-                .map(
-                  (i) =>
-                    `<span class="storage-segment" style="width:${i.percent}%;background:${i.color}" title="${i.name} ${i.percent}%"></span>`
-                )
-                .join("")}
-            </div>
-            <div class="storage-legend">
-              ${categorySegments
-                .map(
-                  (i) =>
-                    `<span class="storage-legend-item"><span class="storage-legend-dot" style="background:${i.color}"></span>${i.name}</span>`
-                )
-                .join("")}
-            </div>
-            <div class="storage-list">
-              ${categorySegments
-                .map(
-                  (i) => `<div class="storage-row" data-category="${i.code}" role="button" tabindex="0" aria-label="编辑${i.name}">
-                    <div class="storage-row-main">
-                      <div class="storage-row-name">${i.name}<span class="storage-row-chevron" aria-hidden="true">›</span></div>
-                      <div class="muted storage-row-meta">${i.percent}%</div>
-                    </div>
-                    <div class="storage-row-value">${i.valueText}</div>
-                  </div>`
-                )
-                .join("")}
-            </div>`
+          ? buildStorageBreakdownMarkup(categorySegments, {
+              dataAttr: "category",
+              ariaPrefix: "查看",
+              emptyText: "暂无资产数据"
+            })
           : '<div class="empty-small">暂无资产数据</div>'
       }
     </div>
@@ -582,35 +828,83 @@ function renderDashboard() {
   view.querySelector('[data-act="goTrends"]').onclick = () => switchTab("trends");
   view.querySelector('[data-act="openCurrencySheet"]').onclick = openCurrencySheet;
   view.querySelector('[data-act="openGrowthSheet"]').onclick = openGrowthSheet;
-  view.querySelectorAll(".storage-row").forEach((row) => {
-    row.onclick = () => openCategoryAsset(row.dataset.category);
+  view.querySelectorAll(".storage-row[data-category]").forEach((row) => {
+    row.onclick = () => openCategoryDetail(row.dataset.category);
   });
 }
 
-function openCategoryAsset(categoryCode) {
+function renderCategoryDetail(categoryCode) {
+  activeCategoryCode = categoryCode;
+  const category = getCategory(categoryCode);
+  const categoryIndex = CATEGORIES.findIndex((c) => c.code === categoryCode);
+  const categoryColor = COLORS[categoryIndex >= 0 ? categoryIndex % COLORS.length : 0];
   const assets = getAssets()
     .filter((a) => a.category === categoryCode)
     .sort((a, b) => b.valueCny - a.valueCny);
-  if (assets.length) {
-    openForm(assets[0].id, { returnTab: "dashboard" });
-    return;
-  }
-  openForm(null, { category: categoryCode, returnTab: "dashboard" });
+  const totalCny = roundMoney(assets.reduce((sum, a) => roundMoney(sum + a.valueCny), 0));
+  const assetSegments = decorateAssetSegments(buildAssetSegments(assets));
+
+  currentTab = "dashboard";
+  statusTitle.textContent = category.name;
+  document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.tab === "dashboard"));
+  view.scrollTop = 0;
+
+  view.innerHTML = `
+    <div class="category-detail-page">
+      <div class="category-detail-head">
+        <button type="button" class="link category-detail-back" data-act="back">返回概览</button>
+        <div class="category-detail-title">
+          <span class="category-detail-dot" style="background:${categoryColor}"></span>
+          <span class="title">${category.name}</span>
+        </div>
+        <div class="muted category-detail-meta">
+          ${assets.length} 项 · 合计 ${formatDisplayMoney(totalCny)}
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <div class="section-title">明细占比</div>
+            <div class="section-subtitle">占比按当前显示币种折算</div>
+          </div>
+        </div>
+        ${buildStorageBreakdownMarkup(assetSegments, {
+          dataAttr: "asset-id",
+          ariaPrefix: "编辑",
+          emptyText: "该分类下暂无资产",
+          listAll: true
+        })}
+      </div>
+      <button type="button" class="btn button-primary category-detail-add" data-act="create">新增${category.name}</button>
+    </div>
+  `;
+
+  view.querySelector('[data-act="back"]').onclick = () => switchTab("dashboard");
+  view.querySelector('[data-act="create"]').onclick = () =>
+    openForm(null, { returnTab: "category", categoryCode, category: categoryCode });
+  view.querySelectorAll(".storage-row[data-asset-id]").forEach((row) => {
+    row.onclick = () =>
+      openForm(row.dataset.assetId, { returnTab: "category", categoryCode });
+  });
+}
+
+function openCategoryDetail(categoryCode) {
+  renderCategoryDetail(categoryCode);
 }
 
 function renderAssets() {
   const assets = getAssets().map((a) => ({
     ...a,
     categoryName: getCategory(a.category).name,
-    amountText: formatMoney(a.amount, a.currency),
-    valueCnyText: formatMoney(a.valueCny)
+    displayValueText: formatDisplayMoney(a.valueCny),
+    recurringText: formatRecurringSummary(a.recurring, a.currency)
   }));
 
   view.innerHTML = `
     <div class="asset-header">
       <div>
         <div class="title">资产账户</div>
-        <div class="muted">维护支付宝、现金、券商、保险等资产</div>
+        <div class="muted">维护股票、基金、黄金、现金、保险、公积金等资产</div>
       </div>
     </div>
     <button class="btn button-primary add-button" data-act="create" aria-label="新增资产">+</button>
@@ -632,10 +926,9 @@ function renderAssets() {
                 <div class="muted">${a.categoryName} · ${a.currency}</div>
               </div>
             </div>
-            <div class="asset-value">${a.valueCnyText}</div>
+            <div class="asset-value">${a.displayValueText}</div>
           </div>
-          <div class="asset-meta"><span>${a.amountText}</span><span>汇率 ${a.exchangeRateToCny}</span></div>
-          ${a.note ? `<div class="asset-note">${a.note}</div>` : ""}
+          ${a.recurringText ? `<div class="asset-meta"><span class="recurring-tag">${a.recurringText}</span></div>` : ""}
         </div>`
       )
       .join("")}
@@ -647,18 +940,37 @@ function renderAssets() {
 }
 
 function openForm(id, options = {}) {
-  const returnTab = options.returnTab || "assets";
-  const defaultCategory = options.category;
+  const formNavigation = {
+    returnTab: options.returnTab || "assets",
+    categoryCode: options.categoryCode || options.category,
+    category: options.category
+  };
+  const lockCategory = formNavigation.returnTab === "category" && formNavigation.categoryCode;
+  activeFormNavigation = formNavigation;
   editingId = id;
   const asset = id ? getAssets().find((a) => a.id === id) : null;
-  const form = asset || {
-    name: "",
-    category: defaultCategory || "cash",
-    currency: "CNY",
-    amount: "",
-    exchangeRateToCny: 1,
-    note: ""
-  };
+  const recurring = asset?.recurring || { enabled: false, interval: "month", amount: 0 };
+  const formCategory = lockCategory ? formNavigation.categoryCode : asset?.category || formNavigation.category || "cash";
+  const form = asset
+    ? { ...asset, category: formCategory }
+    : {
+        name: "",
+        category: formCategory,
+        currency: "CNY"
+      };
+  const formDisplayAmount = asset ? toDisplayAmount(asset.valueCny) : "";
+  const recurringDisplayAmount = recurring.enabled
+    ? toDisplayAmount(toCny(recurring.amount, getDefaultRate(form.currency)))
+    : "";
+  const categoryFieldHtml = lockCategory
+    ? `<div class="field">
+        <div class="label">资产分类</div>
+        <div class="field-locked">${getCategory(formNavigation.categoryCode).name}</div>
+      </div>`
+    : `<div class="field"><div class="label">资产分类</div>
+        <select id="f-category">${CATEGORIES.map(
+          (c) => `<option value="${c.code}" ${c.code === form.category ? "selected" : ""}>${c.name}</option>`
+        ).join("")}</select></div>`;
 
   view.innerHTML = `
     <div class="form-page">
@@ -671,39 +983,62 @@ function openForm(id, options = {}) {
         </div>
         <div class="field"><div class="label">资产名称</div>
           <input id="f-name" value="${form.name}" placeholder="例如：支付宝余额" /></div>
-        <div class="field"><div class="label">资产分类</div>
-          <select id="f-category">${CATEGORIES.map(
-            (c) => `<option value="${c.code}" ${c.code === form.category ? "selected" : ""}>${c.name}</option>`
-          ).join("")}</select></div>
+        ${categoryFieldHtml}
         <div class="field"><div class="label">币种</div>
           <select id="f-currency">${CURRENCIES.map(
             (c) => `<option value="${c.code}" ${c.code === form.currency ? "selected" : ""}>${c.name} ${c.code}</option>`
           ).join("")}</select></div>
-        <div class="field"><div class="label">原币金额</div>
-          <input id="f-amount" type="number" value="${form.amount}" placeholder="0.00" /></div>
-        <div class="field"><div class="label">兑人民币汇率</div>
-          <input id="f-rate" type="number" value="${form.exchangeRateToCny}" placeholder="1.00" /></div>
-        <div class="field"><div class="label">备注</div>
-          <textarea id="f-note" placeholder="可记录账户说明或保单信息">${form.note}</textarea></div>
+        <div class="field"><div class="label">当前金额（${getActiveDisplayCurrency()}）</div>
+          <input id="f-amount" type="number" value="${formDisplayAmount}" placeholder="0.00" /></div>
+        <div class="recurring-section">
+          <label class="recurring-toggle">
+            <input type="checkbox" id="f-recurring-enabled" ${recurring.enabled ? "checked" : ""} />
+            <span class="recurring-toggle-ui" aria-hidden="true"></span>
+            <span class="recurring-toggle-label">定时增加</span>
+          </label>
+          <p class="recurring-hint">适合工资、公积金等固定入账，打开应用时按周期自动累加</p>
+          <div class="recurring-fields" id="recurring-fields" ${recurring.enabled ? "" : "hidden"}>
+            <div class="field"><div class="label">增加频率</div>
+              <select id="f-recurring-interval">${RECURRING_INTERVALS.map(
+                (i) =>
+                  `<option value="${i.code}" ${i.code === recurring.interval ? "selected" : ""}>${i.label}</option>`
+              ).join("")}</select></div>
+            <div class="field"><div class="label">每次增加金额（${getActiveDisplayCurrency()}）</div>
+              <input id="f-recurring-amount" type="number" value="${recurringDisplayAmount}" placeholder="0.00" /></div>
+          </div>
+        </div>
       </div>
-      <button class="btn button-primary save-button" data-act="save">保存资产</button>
-      ${id ? '<button class="btn delete-button" data-act="delete">删除资产</button>' : ""}
+      <div class="form-footer">
+        <button type="button" class="btn button-primary save-button" data-act="save">保存资产</button>
+        ${id ? '<button type="button" class="btn delete-button" data-act="delete">删除资产</button>' : ""}
+      </div>
     </div>
   `;
 
-  view.querySelector('[data-act="back"]').onclick = () => switchTab(returnTab);
-  view.querySelector("#f-currency").onchange = (e) => {
-    view.querySelector("#f-rate").value = getDefaultRate(e.target.value);
+  const recurringFields = view.querySelector("#recurring-fields");
+  const recurringToggle = view.querySelector("#f-recurring-enabled");
+  const recurringAmountInput = view.querySelector("#f-recurring-amount");
+  const amountInput = view.querySelector("#f-amount");
+  recurringToggle.onchange = () => {
+    recurringFields.hidden = !recurringToggle.checked;
+    if (recurringToggle.checked && !recurringAmountInput.value && amountInput.value) {
+      recurringAmountInput.value = amountInput.value;
+    }
   };
+
+  view.querySelector('[data-act="back"]').onclick = () => navigateAfterForm(formNavigation);
   view.querySelector('[data-act="save"]').onclick = () => {
+    const category = lockCategory
+      ? formNavigation.categoryCode
+      : view.querySelector("#f-category").value;
+    const nativeCurrency = view.querySelector("#f-currency").value;
     const next = normalizeAsset({
       id: id || undefined,
       name: view.querySelector("#f-name").value,
-      category: view.querySelector("#f-category").value,
-      currency: view.querySelector("#f-currency").value,
-      amount: view.querySelector("#f-amount").value,
-      exchangeRateToCny: view.querySelector("#f-rate").value,
-      note: view.querySelector("#f-note").value
+      category,
+      currency: nativeCurrency,
+      amount: convertDisplayToNative(amountInput.value, getActiveDisplayCurrency(), nativeCurrency),
+      recurring: readRecurringFromForm(view, nativeCurrency)
     });
     const err = validateAsset(next);
     if (err) {
@@ -711,16 +1046,18 @@ function openForm(id, options = {}) {
       return;
     }
     upsertAsset(next);
-    switchTab(returnTab);
+    navigateAfterForm(formNavigation);
   };
   const delBtn = view.querySelector('[data-act="delete"]');
   if (delBtn)
     delBtn.onclick = () => {
       if (confirm("删除后会更新资产快照，确定继续吗？")) {
         deleteAsset(id);
-        switchTab(returnTab);
+        navigateAfterForm(formNavigation);
       }
     };
+
+  view.scrollTop = 0;
 }
 
 function renderTrends() {
@@ -738,8 +1075,8 @@ function renderTrends() {
       const prefix = s.deltaCny >= 0 ? "+" : "";
       return {
         dateText: `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
-        totalText: formatMoney(s.totalValueCny),
-        deltaText: `${prefix}${formatMoney(s.deltaCny)}`,
+        totalText: formatDisplayMoney(s.totalValueCny),
+        deltaText: `${prefix}${formatDisplayMoney(s.deltaCny)}`,
         deltaPercentText: `${prefix}${formatPercent(s.deltaPercent)}`,
         cls: s.deltaCny >= 0 ? "delta-up" : "delta-down"
       };
@@ -760,11 +1097,11 @@ function renderTrends() {
       <div class="trend-meta">
         <div class="trend-meta-item">
           <div class="label">最新总额</div>
-          <div class="value">${latest ? formatMoney(latest.totalValueCny) : "暂无"}</div>
+          <div class="value">${latest ? formatDisplayMoney(latest.totalValueCny) : "暂无"}</div>
         </div>
         <div class="trend-meta-item">
           <div class="label">累计变化</div>
-          <div class="value">${latest ? `${totalDeltaPrefix}${formatMoney(totalDelta)}` : "暂无"}</div>
+          <div class="value">${latest ? `${totalDeltaPrefix}${formatDisplayMoney(totalDelta)}` : "暂无"}</div>
         </div>
       </div>
     </div>
@@ -824,7 +1161,7 @@ function renderSettings() {
       if (!Array.isArray(data.assets)) throw new Error("导入数据格式不正确");
       writeJson(ASSETS_KEY, data.assets.map((a) => normalizeAsset(a)));
       writeJson(SNAPSHOTS_KEY, Array.isArray(data.snapshots) ? data.snapshots : []);
-      recordSnapshotIfNeeded();
+      recordSnapshotForAssets(loadAssetsRaw());
       alert("导入成功");
       switchTab("dashboard");
     } catch (e) {
@@ -850,6 +1187,11 @@ const renderers = {
 
 function switchTab(tab) {
   closeOverlaySheet();
+  const renderer = renderers[tab];
+  if (!renderer) {
+    switchTab("dashboard");
+    return;
+  }
   currentTab = tab;
   statusTitle.textContent = TAB_TITLES[tab] || "资产总览";
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
@@ -861,5 +1203,6 @@ document.querySelectorAll(".tab-item").forEach((b) => {
   b.onclick = () => switchTab(b.dataset.tab);
 });
 
+migrateStoredDataIfNeeded();
 seedIfEmpty();
 switchTab("dashboard");
