@@ -23,7 +23,25 @@ cd /Users/loboluo/asset-miniapp/web-preview && nohup python3 -m http.server 5050
 http://127.0.0.1:5050/index.html
 ```
 
-保存 `web-preview/` 下任意文件后，页面会在 1 秒内自动刷新。
+保存 `web-preview/` 下任意文件后，页面会在 1 秒内自动刷新（仅本地预览）。
+
+## 在线预览（GitHub Pages）
+
+推送到 `preview-ui-polish` 或 `main` 分支后，GitHub Actions 会自动部署 `web-preview/`。
+
+**首次启用（只需一次）：**
+
+1. 打开 https://github.com/lwhwayne/asset-miniapp/settings/pages
+2. **Build and deployment → Source** 选择 **GitHub Actions**
+3. 推送代码后，在 **Actions** 页查看 `Deploy web preview to GitHub Pages` 是否成功
+
+**访问地址：**
+
+```
+https://lwhwayne.github.io/asset-miniapp/
+```
+
+若 404，等 1–2 分钟再试，或到 Actions 确认部署已完成。
 
 ## 文件说明
 
