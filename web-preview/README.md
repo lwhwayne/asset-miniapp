@@ -27,21 +27,30 @@ http://127.0.0.1:5050/index.html
 
 ## 在线预览（GitHub Pages）
 
-推送到 `preview-ui-polish` 或 `main` 分支后，GitHub Actions 会自动部署 `web-preview/`。
+推送 `web-preview/` 后，GitHub Actions 会把内容发布到 `gh-pages` 分支。
 
-**首次启用（只需一次）：**
+### 第一次启用（按顺序做）
 
 1. 打开 https://github.com/lwhwayne/asset-miniapp/settings/pages
-2. **Build and deployment → Source** 选择 **GitHub Actions**
-3. 推送代码后，在 **Actions** 页查看 `Deploy web preview to GitHub Pages` 是否成功
+2. **Build and deployment → Source** 选 **Deploy from a branch**
+3. **Branch** 选 `gh-pages`，文件夹选 **/ (root)**，点 Save
+4. 打开 https://github.com/lwhwayne/asset-miniapp/actions
+5. 左侧选 **Deploy web preview to GitHub Pages**，点 **Run workflow** → Run workflow
+6. 等约 1–2 分钟，看到绿色勾后再访问下方链接
 
-**访问地址：**
+若还没有 `gh-pages` 分支，先完成第 5 步跑一遍 workflow，分支会自动创建。
+
+### 访问地址
 
 ```
 https://lwhwayne.github.io/asset-miniapp/
 ```
 
-若 404，等 1–2 分钟再试，或到 Actions 确认部署已完成。
+### 常见问题
+
+- **404**：Pages 源未设为 `gh-pages`，或 workflow 还没跑成功
+- **私有仓库**：Settings → Pages → 把可见性设为 **Public**（免费账号私有仓需先公开 Pages 或升级套餐）
+- **更新不生效**：push 代码后等 Actions 跑完，浏览器强制刷新
 
 ## 文件说明
 
