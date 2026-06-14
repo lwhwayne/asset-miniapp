@@ -346,30 +346,34 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 10px;
+  justify-self: start;
+  align-self: center;
+  width: fit-content;
+  padding: 0;
   border: 0;
-  border-radius: var(--r-full);
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.82);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
   font-size: var(--fs-meta);
   font-weight: 500;
+  line-height: 1.25;
   cursor: pointer;
-  transition: background 160ms ease, transform 160ms ease;
+  transition: opacity 160ms ease;
 }
 
 .growth-trigger:active {
-  transform: translateY(1px);
-  background: rgba(255, 255, 255, 0.18);
+  opacity: 0.72;
 }
 
 .growth-label {
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .hero-growth-value {
   justify-self: end;
+  align-self: center;
   font-size: var(--fs-body);
   font-weight: 700;
+  line-height: 1.25;
   text-align: right;
 }
 
