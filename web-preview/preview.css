@@ -342,9 +342,28 @@ select:focus-visible {
   opacity: 0.8;
 }
 
-.hero-growth-label {
+.growth-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
   font-size: var(--fs-meta);
-  color: rgba(255, 255, 255, 0.68);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.growth-trigger:active {
+  transform: translateY(1px);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.growth-label {
+  line-height: 1.3;
 }
 
 .hero-growth-value {

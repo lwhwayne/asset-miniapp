@@ -68,14 +68,52 @@ function calcMonthGrowth(snapshots, currentTotal) {
   const firstInMonth = sorted.find((s) => new Date(s.date) >= monthStart);
   const baseline = beforeMonth || firstInMonth;
   if (!baseline || baseline.totalValueCny === 0) {
-    return { text: "暂无数据", cls: "flat" };
+    return { hasData: false, percent: 0, deltaCny: 0, cls: "flat" };
   }
-  const percent = roundMoney(((currentTotal - baseline.totalValueCny) / baseline.totalValueCny) * 100);
-  const prefix = percent >= 0 ? "+" : "";
+  const deltaCny = roundMoney(currentTotal - baseline.totalValueCny);
+  const percent = roundMoney((deltaCny / baseline.totalValueCny) * 100);
   return {
-    text: `${prefix}${formatPercent(percent)}`,
-    cls: percent > 0 ? "up" : percent < 0 ? "down" : "flat"
+    hasData: true,
+    percent,
+    deltaCny,
+    cls: deltaCny > 0 ? "up" : deltaCny < 0 ? "down" : "flat"
   };
+}
+
+const GROWTH_METRICS = [
+  { code: "rate", label: "本月增长率" },
+  { code: "amount", label: "本月增长额" }
+];
+const GROWTH_METRIC_KEY = "asset-miniapp.growthMetric";
+
+function getGrowthMetric() {
+  const saved = localStorage.getItem(GROWTH_METRIC_KEY);
+  return GROWTH_METRICS.some((m) => m.code === saved) ? saved : "rate";
+}
+function setGrowthMetric(code) {
+  localStorage.setItem(GROWTH_METRIC_KEY, code);
+}
+function formatGrowthRate(percent) {
+  const prefix = percent >= 0 ? "+" : "";
+  return `${prefix}${formatPercent(percent)}`;
+}
+function formatGrowthAmount(deltaCny, currency) {
+  const amount = convertFromCny(Math.abs(deltaCny), currency);
+  const prefix = deltaCny >= 0 ? "+" : "-";
+  return `${prefix}${amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+function getGrowthDisplay(monthGrowth, metric, currency) {
+  const item = GROWTH_METRICS.find((m) => m.code === metric) || GROWTH_METRICS[0];
+  if (!monthGrowth.hasData) {
+    return { label: item.label, text: "暂无数据", cls: "flat" };
+  }
+  if (metric === "amount") {
+    return { label: item.label, text: formatGrowthAmount(monthGrowth.deltaCny, currency), cls: monthGrowth.cls };
+  }
+  return { label: item.label, text: formatGrowthRate(monthGrowth.percent), cls: monthGrowth.cls };
 }
 
 // ---------- asset model ----------
@@ -350,12 +388,12 @@ function firstChar(value) {
   return String(value || "").trim().slice(0, 1) || "资";
 }
 
-function closeCurrencySheet() {
+function closeOverlaySheet() {
   document.querySelector(".sheet-overlay")?.remove();
 }
 
 function openCurrencySheet() {
-  closeCurrencySheet();
+  closeOverlaySheet();
   const device = document.querySelector(".device");
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay";
@@ -377,13 +415,46 @@ function openCurrencySheet() {
   requestAnimationFrame(() => overlay.classList.add("open"));
 
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) closeCurrencySheet();
+    if (e.target === overlay) closeOverlaySheet();
   });
   overlay.querySelectorAll("[data-currency]").forEach((btn) => {
     btn.onclick = () => {
       displayCurrency = btn.dataset.currency;
       setDisplayCurrency(displayCurrency);
-      closeCurrencySheet();
+      closeOverlaySheet();
+      if (currentTab === "dashboard") renderDashboard();
+    };
+  });
+}
+
+function openGrowthSheet() {
+  closeOverlaySheet();
+  const device = document.querySelector(".device");
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  overlay.innerHTML = `
+    <div class="action-sheet" role="dialog" aria-label="选择增长指标">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">选择增长指标</div>
+      ${GROWTH_METRICS.map((item) => {
+        const active = item.code === growthMetric ? " active" : "";
+        return `<button class="sheet-option${active}" data-growth-metric="${item.code}">
+          <span>${item.label}</span>
+        </button>`;
+      }).join("")}
+    </div>
+  `;
+  device.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add("open"));
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeOverlaySheet();
+  });
+  overlay.querySelectorAll("[data-growth-metric]").forEach((btn) => {
+    btn.onclick = () => {
+      growthMetric = btn.dataset.growthMetric;
+      setGrowthMetric(growthMetric);
+      closeOverlaySheet();
       if (currentTab === "dashboard") renderDashboard();
     };
   });
@@ -395,6 +466,7 @@ const statusTitle = document.querySelector(".status-right");
 let currentTab = "dashboard";
 let editingId = null;
 let displayCurrency = getDisplayCurrency();
+let growthMetric = getGrowthMetric();
 const TAB_TITLES = {
   dashboard: "资产总览",
   assets: "资产账户",
@@ -411,6 +483,7 @@ function renderDashboard() {
   const currencySegments = decorateSegments(summary.currencySegments);
   const trendPoints = buildTrendPoints(snapshots).slice(-8);
   const monthGrowth = calcMonthGrowth(snapshots, summary.totalValueCny);
+  const growthDisplay = getGrowthDisplay(monthGrowth, growthMetric, displayCurrency);
 
   view.innerHTML = `
     <div class="hero-card">
@@ -427,8 +500,11 @@ function renderDashboard() {
           </div>
           <button class="hero-add-btn" data-act="create" aria-label="新增资产">+</button>
           <div class="hero-divider"></div>
-          <span class="hero-growth-label">本月增长率</span>
-          <span class="hero-growth-value ${monthGrowth.cls}">${monthGrowth.text}</span>
+          <button class="growth-trigger" data-act="openGrowthSheet" aria-label="切换增长指标">
+            <span class="growth-label">${growthDisplay.label}</span>
+            <span class="currency-chevron" aria-hidden="true">▾</span>
+          </button>
+          <span class="hero-growth-value ${growthDisplay.cls}">${growthDisplay.text}</span>
         </div>
       </div>
     </div>
@@ -505,6 +581,7 @@ function renderDashboard() {
   view.querySelector('[data-act="create"]').onclick = () => openForm(null, { returnTab: "dashboard" });
   view.querySelector('[data-act="goTrends"]').onclick = () => switchTab("trends");
   view.querySelector('[data-act="openCurrencySheet"]').onclick = openCurrencySheet;
+  view.querySelector('[data-act="openGrowthSheet"]').onclick = openGrowthSheet;
   view.querySelectorAll(".storage-row").forEach((row) => {
     row.onclick = () => openCategoryAsset(row.dataset.category);
   });
@@ -772,7 +849,7 @@ const renderers = {
 };
 
 function switchTab(tab) {
-  closeCurrencySheet();
+  closeOverlaySheet();
   currentTab = tab;
   statusTitle.textContent = TAB_TITLES[tab] || "资产总览";
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
